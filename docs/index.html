@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Council Research Search</title>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <style>
+    :root {
+      --bg: #f4f7f3;
+      --panel: #ffffff;
+      --text: #112012;
+      --muted: #415245;
+      --line: #bfccbf;
+      --accent: #2f6231;
+      --accent-soft: #e7f2e6;
+    }
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "Gill Sans", "Trebuchet MS", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 15% 15%, #f4faea, transparent 35%),
+        radial-gradient(circle at 90% 0%, #ebf5ff, transparent 30%),
+        linear-gradient(145deg, #edf3e6, #f9fbf6 45%, #eef2ff);
+    }
+    .wrap {
+      max-width: 1180px;
+      margin: 28px auto;
+      padding: 0 16px 32px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 16px;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.06);
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 1.55rem;
+    }
+    .controls {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 1fr;
+      margin-bottom: 12px;
+      max-width: 420px;
+    }
+    input, select {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-size: 0.95rem;
+      background: #fff;
+    }
+    .hint {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-bottom: 14px;
+    }
+    .result {
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+      margin-top: 14px;
+    }
+    .result h2 {
+      margin: 0 0 8px;
+      font-size: 1.75rem;
+      color: var(--accent);
+      letter-spacing: 0.01em;
+    }
+    .meta {
+      color: var(--muted);
+      margin-bottom: 8px;
+      font-size: 0.92rem;
+    }
+    .hero {
+      display: grid;
+      grid-template-columns: 1.05fr 1fr;
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+    .hero-box {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px;
+      background: linear-gradient(160deg, #fbfff8, #f3f8f1);
+    }
+    #map {
+      width: 100%;
+      min-height: 300px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      overflow: hidden;
+      background: #f0f4f0;
+    }
+    .sections-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(260px, 1fr));
+      gap: 12px;
+    }
+    .texture-box {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px;
+      background: linear-gradient(160deg, #ffffff, #f3f7f2);
+      box-shadow: 0 2px 8px rgba(17, 32, 18, 0.05);
+    }
+    h3 {
+      margin: 0 0 8px;
+      font-size: 0.98rem;
+      color: #1d381e;
+    }
+    ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+    li { margin: 3px 0; }
+    a {
+      color: #1d5e22;
+      text-decoration-thickness: 1px;
+    }
+    a:hover { text-decoration-thickness: 2px; }
+    .count {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .map-note {
+      font-size: 0.86rem;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+    @media (max-width: 700px) {
+      .controls { grid-template-columns: 1fr; }
+      .hero { grid-template-columns: 1fr; }
+      .sections-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Council Research Search</h1>
+      <div class="controls">
+        <select id="authoritySelect">
+          <option value="">Select local authority</option>
+        </select>
+      </div>
+      <div class="hint">Select a local authority to display its information and boundary map.</div>
+      <div id="results"></div>
+      <div id="count" class="count"></div>
+    </div>
+  </div>
+
+  <script src="./council_research_database.js"></script>
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <script>
+    const db = window.COUNCIL_DB?.authorities || [];
+    const select = document.getElementById('authoritySelect');
+    const results = document.getElementById('results');
+    const count = document.getElementById('count');
+    let map = null;
+    let boundaryLayer = null;
+    let boundaryIndexPromise = null;
+    const BOUNDARY_INDEX_FILE = './boundaries/index.json';
+    const AUTHORITY_ALIASES = {
+      'na h-eileanan siar (western isles)': 'na h-eileanan siar'
+    };
+
+    function escapeHtml(value) {
+      return String(value || '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function renderItem(item) {
+      if (typeof item === 'string') {
+        return escapeHtml(item);
+      }
+      const text = escapeHtml(item?.text || '');
+      const url = item?.url;
+      if (url) {
+        return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+      }
+      return text;
+    }
+
+    function initMap() {
+      if (map) return;
+      map = L.map('map', { zoomControl: true }).setView([56.5, -4.0], 6);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 18,
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+    }
+
+    function normalizeAuthorityName(name) {
+      const base = String(name || '')
+        .toLowerCase()
+        .replace(/\(.*?\)/g, '')
+        .replace(/&/g, 'and')
+        .replace(/[^\w\s-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      return AUTHORITY_ALIASES[base] || base;
+    }
+
+    async function loadBoundaryIndex() {
+      if (!boundaryIndexPromise) {
+        boundaryIndexPromise = fetch(BOUNDARY_INDEX_FILE).then(async (resp) => {
+          if (!resp.ok) {
+            throw new Error(`Boundary index load failed (${resp.status})`);
+          }
+          return resp.json();
+        });
+      }
+      return boundaryIndexPromise;
+    }
+
+    async function drawBoundary(authorityName) {
+      const mapEl = document.getElementById('map');
+      const mapNote = document.getElementById('mapNote');
+      if (!mapEl) return;
+      initMap();
+      if (boundaryLayer) {
+        map.removeLayer(boundaryLayer);
+        boundaryLayer = null;
+      }
+      mapNote.textContent = 'Loading local authority boundary...';
+      try {
+        const boundaryIndex = await loadBoundaryIndex();
+        const items = Array.isArray(boundaryIndex?.items) ? boundaryIndex.items : [];
+        if (!items.length) {
+          mapNote.textContent = 'Boundary index is empty.';
+          return;
+        }
+
+        const target = normalizeAuthorityName(authorityName);
+        const match = items.find((it) => {
+          return normalizeAuthorityName(it?.name || '') === target;
+        });
+
+        if (!match) {
+          mapNote.textContent = 'Boundary file reference not found for this authority.';
+          return;
+        }
+
+        const featureResp = await fetch(match.file);
+        if (!featureResp.ok) {
+          mapNote.textContent = `Boundary file load failed (${featureResp.status}).`;
+          return;
+        }
+        const featureGeojson = await featureResp.json();
+        boundaryLayer = L.geoJSON(featureGeojson, {
+          style: {
+            color: '#2f6231',
+            weight: 2,
+            fillColor: '#83b984',
+            fillOpacity: 0.2
+          }
+        }).addTo(map);
+        map.fitBounds(boundaryLayer.getBounds(), { padding: [16, 16] });
+        setTimeout(() => map.invalidateSize(), 0);
+        mapNote.textContent = 'Boundary source: ONS LAD Dec 2023 (UK BFC), filtered to Scotland.';
+      } catch (err) {
+        const isFileProtocol = window.location.protocol === 'file:';
+        if (isFileProtocol) {
+          mapNote.textContent = 'Could not load boundary files. Open this app via a local web server (not file://).';
+        } else {
+          const msg = (err && err.message) ? err.message : 'unknown error';
+          mapNote.textContent = `Could not load boundary files: ${msg}`;
+        }
+      }
+    }
+
+    function listHtml(items) {
+      if (!items || !items.length) return '<div class="meta">No items listed.</div>';
+      return `<ul>${items.map(item => `<li>${renderItem(item)}</li>`).join('')}</ul>`;
+    }
+
+    function renderCard(authority, includeMap) {
+      const simd = authority.simd_summary || null;
+      const simdHtml = simd ? `
+        <div class="meta">
+          <strong>SIMD Summary</strong><br>
+          Mean SIMD rank: ${escapeHtml(simd.mean_simd_rank)} (LA rank ${escapeHtml(simd.la_rank_mean_simd_rank)} / 32, higher is better)<br>
+          Most deprived 20%: ${escapeHtml(simd.percent_in_most_deprived_20pc)}% (LA rank ${escapeHtml(simd.la_rank_most_deprived_20pc)} / 32, lower is better)<br>
+          Least deprived 20%: ${escapeHtml(simd.percent_in_least_deprived_20pc)}% (LA rank ${escapeHtml(simd.la_rank_least_deprived_20pc)} / 32, higher is better)
+        </div>
+      ` : '<div class="meta"><strong>SIMD Summary</strong><br>Not available for this authority.</div>';
+
+      return `
+      <div class="result">
+        <div class="hero">
+          <div class="hero-box">
+            <h2>${escapeHtml(authority.local_authority)}</h2>
+            <div class="meta">
+              Estimated population 2023: ${escapeHtml(authority.estimated_population_2023 || 'N/A')}<br>
+              ${escapeHtml(authority.population_rank_2023 || '')}<br>
+              ${escapeHtml(authority.area_rank || '')}
+            </div>
+            ${simdHtml}
+          </div>
+          ${includeMap ? `
+          <div>
+            <div id="map"></div>
+            <div id="mapNote" class="map-note"></div>
+          </div>` : ''}
+        </div>
+        <div class="sections-grid">
+          <section class="texture-box">
+            <h3>Community Planning Partnership</h3>
+            ${listHtml(authority.community_planning_partnership)}
+          </section>
+          <section class="texture-box">
+            <h3>Planning</h3>
+            ${listHtml(authority.planning)}
+          </section>
+          <section class="texture-box">
+            <h3>Participatory Budgeting</h3>
+            ${listHtml(authority.participatory_budgeting)}
+          </section>
+          <section class="texture-box">
+            <h3>Statistics</h3>
+            ${listHtml(authority.statistics)}
+          </section>
+          <section class="texture-box">
+            <h3>Other Useful Info</h3>
+            ${listHtml(authority.other_useful_info)}
+          </section>
+        </div>
+      </div>`;
+    }
+
+    function applyFilters() {
+      const selected = select.value.trim().toLowerCase();
+
+      const filtered = db.filter(row => {
+        const authorityMatch = !selected || row.local_authority.toLowerCase() === selected;
+        return authorityMatch;
+      });
+
+      if (!filtered.length) {
+        if (map) {
+          map.remove();
+          map = null;
+          boundaryLayer = null;
+        }
+        results.innerHTML = '<div class="meta">No matches found.</div>';
+        count.textContent = '0 result(s)';
+        return;
+      }
+
+      if (filtered.length === 1) {
+        if (map) {
+          map.remove();
+          map = null;
+          boundaryLayer = null;
+        }
+        results.innerHTML = renderCard(filtered[0], true);
+        drawBoundary(filtered[0].local_authority);
+      } else {
+        if (map) {
+          map.remove();
+          map = null;
+          boundaryLayer = null;
+        }
+        results.innerHTML = `
+          <div class="meta">Multiple matches found. Select one local authority to view full details and map boundaries.</div>
+          <ul>${filtered.map(r => `<li>${escapeHtml(r.local_authority)}</li>`).join('')}</ul>
+        `;
+      }
+      count.textContent = `${filtered.length} result(s)`;
+    }
+
+    function init() {
+      const options = db
+        .map(r => r.local_authority)
+        .sort((a, b) => a.localeCompare(b))
+        .map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
+        .join('');
+      select.insertAdjacentHTML('beforeend', options);
+      select.value = 'Aberdeen City';
+      select.addEventListener('change', applyFilters);
+      applyFilters();
+    }
+
+    init();
+  </script>
+</body>
+</html>
